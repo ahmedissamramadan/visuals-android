@@ -240,7 +240,11 @@ fun VisualsAdminApp() {
                     scope.launch {
                         isLoading = true
                         loginError = null
-                        val email = if (username.trim().equals("boda890", ignoreCase = true)) "bodykhaled5000@gmail.com" else username.trim()
+                        val email = when {
+                            username.trim().equals("boda890", ignoreCase = true) -> "bodykhaled5000@gmail.com"
+                            username.trim().equals("admin", ignoreCase = true) -> "ahmedissam.personal@gmail.com"
+                            else -> username.trim()
+                        }
                         val payload = JSONObject().put("email", email).put("password", password).toString()
                         withContext(Dispatchers.IO) {
                             val req = Request.Builder()
