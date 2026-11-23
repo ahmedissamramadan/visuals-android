@@ -1,5 +1,6 @@
 package com.ahmedramadan.visuals
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -102,6 +103,37 @@ fun VisualsAdminApp() {
     var newColEn by remember { mutableStateOf("") }
     var newColAr by remember { mutableStateOf("") }
     var activeTab by remember { mutableStateOf(0) }
+
+    var updateVersion by remember { mutableStateOf<String?>(null) }
+    var updateApkUrl by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            try {
+                val pkgInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+                val currentVer = pkgInfo.versionName ?: "1.0.0"
+                val req = Request.Builder()
+                    .url("https://api.github.com/repos/ahmedissamramadan/visuals-android/releases/latest")
+                    .addHeader("Accept", "application/vnd.github+json")
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val json = JSONObject(resp.body?.string() ?: "{}")
+                        val tag = json.optString("tag_name", "").removePrefix("v")
+                        val assets = json.optJSONArray("assets")
+                        var dlUrl = json.optString("html_url", "https://github.com/ahmedissamramadan/visuals-android/releases/latest")
+                        if (assets != null && assets.length() > 0) {
+                            dlUrl = assets.getJSONObject(0).optString("browser_download_url", dlUrl)
+                        }
+                        if (tag.isNotBlank() && tag != currentVer) {
+                            updateVersion = tag
+                            updateApkUrl = dlUrl
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
 
     suspend fun loadDashboardData(token: String) {
         withContext(Dispatchers.IO) {
@@ -317,6 +349,18 @@ fun VisualsAdminApp() {
         }
     } else {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+            if (updateVersion != null && updateApkUrl != null) {
+                Button(
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(updateApkUrl))
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("تحديث جديد متاح (v$updateVersion) - اضغط للتحميل")
+                }
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,

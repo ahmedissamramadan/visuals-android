@@ -12,8 +12,9 @@ android {
         applicationId = "com.ahmedramadan.visuals"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        val runNum = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 10
+        versionCode = runNum
+        versionName = "1.0.$runNum"
     }
 
     buildTypes {
