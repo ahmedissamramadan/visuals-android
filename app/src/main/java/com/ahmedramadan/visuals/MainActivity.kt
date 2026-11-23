@@ -361,7 +361,7 @@ fun VisualsAdminApp() {
             OutlinedTextField(
                 value = username,
                 onValueChange = { username = it },
-                label = { Text("اسم المستخدم (admin / boda890) أو الإيميل") },
+                label = { Text("اسم المستخدم أو البريد الإلكتروني") },
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(12.dp))
