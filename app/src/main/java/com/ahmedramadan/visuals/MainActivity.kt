@@ -12,6 +12,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -29,8 +30,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -56,35 +60,10 @@ private val TextIvory = Color(0xFFF3EFE6)
 private val MutedGray = Color(0xFF9A958C)
 private val DangerRed = Color(0xFFE06C75)
 
-data class CollectionItem(
-    val id: String,
-    val slug: String,
-    val titleEn: String,
-    val titleAr: String,
-    val isPublished: Boolean
-)
-
-data class WorkItem(
-    val id: String,
-    val slug: String,
-    val titleEn: String,
-    val titleAr: String,
-    val origin: String,
-    val collectionId: String,
-    val thumbUrl: String,
-    val fullUrl: String,
-    val isPublished: Boolean,
-    val isFeatured: Boolean,
-    val qualityScore: Int
-)
-
-data class CommentItem(
-    val id: String,
-    val body: String,
-    val isHidden: Boolean,
-    val author: String,
-    val workTitle: String
-)
+data class CollectionItem(val id: String, val slug: String, val titleEn: String, val titleAr: String, val isPublished: Boolean)
+data class WorkItem(val id: String, val slug: String, val titleEn: String, val titleAr: String, val origin: String, val collectionId: String, val thumbUrl: String, val fullUrl: String, val isPublished: Boolean, val isFeatured: Boolean, val qualityScore: Int)
+data class CommentItem(val id: String, val body: String, val isHidden: Boolean, val author: String, val workTitle: String)
+data class AuditLogItem(val id: String, val adminName: String, val action: String, val targetType: String, val targetId: String, val createdAt: String)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -115,7 +94,13 @@ fun VisualsAdminApp() {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
+    var isAr by remember { mutableStateOf(true) }
+    fun tr(ar: String, en: String) = if (isAr) ar else en
+
     var accessToken by remember { mutableStateOf<String?>(null) }
+    var currentAdminId by remember { mutableStateOf<String?>(null) }
+    var currentAdminName by remember { mutableStateOf("admin") }
+
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var loginError by remember { mutableStateOf<String?>(null) }
@@ -124,28 +109,26 @@ fun VisualsAdminApp() {
     var collections by remember { mutableStateOf<List<CollectionItem>>(emptyList()) }
     var works by remember { mutableStateOf<List<WorkItem>>(emptyList()) }
     var comments by remember { mutableStateOf<List<CommentItem>>(emptyList()) }
+    var auditLogs by remember { mutableStateOf<List<AuditLogItem>>(emptyList()) }
 
-    // Navigation state: 0=Home, 1=Works, 2=Upload, 3=Collections, 4=Comments
     var activeTab by remember { mutableStateOf(0) }
     var editingWork by remember { mutableStateOf<WorkItem?>(null) }
+    var viewingCollection by remember { mutableStateOf<CollectionItem?>(null) }
+    var confirmDeleteCol by remember { mutableStateOf<CollectionItem?>(null) }
 
-    // Filters
     var workSearch by remember { mutableStateOf("") }
-    var workStatusFilter by remember { mutableStateOf("all") } // all, published, archived, featured
+    var workStatusFilter by remember { mutableStateOf("all") }
 
-    // Upload state
     var selectedColIndex by remember { mutableStateOf(0) }
     var selectedOrigin by remember { mutableStateOf("camera") }
     var uploadTitleAr by remember { mutableStateOf("") }
     var uploadTitleEn by remember { mutableStateOf("") }
     var statusMsg by remember { mutableStateOf("") }
 
-    // New collection state
     var newColSlug by remember { mutableStateOf("") }
     var newColEn by remember { mutableStateOf("") }
     var newColAr by remember { mutableStateOf("") }
 
-    // Update checker state
     var updateVersion by remember { mutableStateOf<String?>(null) }
     var updateApkUrl by remember { mutableStateOf<String?>(null) }
 
@@ -177,6 +160,29 @@ fun VisualsAdminApp() {
         }
     }
 
+    suspend fun logAdminAction(token: String, action: String, targetType: String, targetId: String, details: JSONObject = JSONObject()) {
+        val adminId = currentAdminId ?: return
+        withContext(Dispatchers.IO) {
+            try {
+                val body = JSONObject().apply {
+                    put("admin_id", adminId)
+                    put("admin_name", currentAdminName)
+                    put("action", action)
+                    put("target_type", targetType)
+                    put("target_id", targetId)
+                    put("details", details)
+                }
+                val req = Request.Builder()
+                    .url("$SUPABASE_URL/rest/v1/admin_audit_logs")
+                    .post(body.toString().toRequestBody("application/json".toMediaType()))
+                    .addHeader("apikey", SUPABASE_ANON_KEY)
+                    .addHeader("Authorization", "Bearer $token")
+                    .build()
+                client.newCall(req).execute().close()
+            } catch (_: Exception) {}
+        }
+    }
+
     suspend fun loadDashboardData(token: String) {
         withContext(Dispatchers.IO) {
             val colReq = Request.Builder()
@@ -190,22 +196,15 @@ fun VisualsAdminApp() {
                     val list = mutableListOf<CollectionItem>()
                     for (i in 0 until arr.length()) {
                         val o = arr.getJSONObject(i)
-                        list.add(
-                            CollectionItem(
-                                o.getString("id"),
-                                o.getString("slug"),
-                                o.getString("title_en"),
-                                o.getString("title_ar"),
-                                o.optBoolean("is_published", true)
-                            )
-                        )
+                        list.add(CollectionItem(o.getString("id"), o.getString("slug"), o.getString("title_en"), o.getString("title_ar"), o.optBoolean("is_published", true)))
                     }
                     collections = list
+                    viewingCollection?.let { vc -> viewingCollection = list.find { it.id == vc.id } }
                 }
             }
 
             val workReq = Request.Builder()
-                .url("$SUPABASE_URL/rest/v1/works?select=id,slug,title_en,title_ar,origin,collection_id,image_urls,is_published,is_featured,quality_score&order=created_at.desc&limit=250")
+                .url("$SUPABASE_URL/rest/v1/works?select=id,slug,title_en,title_ar,origin,collection_id,image_urls,is_published,is_featured,quality_score&order=created_at.desc&limit=300")
                 .addHeader("apikey", SUPABASE_ANON_KEY)
                 .addHeader("Authorization", "Bearer $token")
                 .build()
@@ -218,21 +217,7 @@ fun VisualsAdminApp() {
                         val imgs = o.optJSONObject("image_urls")
                         val thumb = imgs?.optString("480")?.ifBlank { imgs.optString("1200", "") } ?: ""
                         val full = imgs?.optString("1200")?.ifBlank { thumb } ?: thumb
-                        list.add(
-                            WorkItem(
-                                o.getString("id"),
-                                o.getString("slug"),
-                                o.optString("title_en", ""),
-                                o.optString("title_ar", ""),
-                                o.getString("origin"),
-                                o.getString("collection_id"),
-                                thumb,
-                                full,
-                                o.optBoolean("is_published", true),
-                                o.optBoolean("is_featured", false),
-                                o.optInt("quality_score", 85)
-                            )
-                        )
+                        list.add(WorkItem(o.getString("id"), o.getString("slug"), o.optString("title_en", ""), o.optString("title_ar", ""), o.getString("origin"), o.getString("collection_id"), thumb, full, o.optBoolean("is_published", true), o.optBoolean("is_featured", false), o.optInt("quality_score", 85)))
                     }
                     works = list
                 }
@@ -256,6 +241,23 @@ fun VisualsAdminApp() {
                     comments = list
                 }
             }
+
+            val logReq = Request.Builder()
+                .url("$SUPABASE_URL/rest/v1/admin_audit_logs?select=id,admin_name,action,target_type,target_id,created_at&order=created_at.desc&limit=25")
+                .addHeader("apikey", SUPABASE_ANON_KEY)
+                .addHeader("Authorization", "Bearer $token")
+                .build()
+            client.newCall(logReq).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val arr = JSONArray(resp.body?.string() ?: "[]")
+                    val list = mutableListOf<AuditLogItem>()
+                    for (i in 0 until arr.length()) {
+                        val o = arr.getJSONObject(i)
+                        list.add(AuditLogItem(o.getString("id"), o.getString("admin_name"), o.getString("action"), o.getString("target_type"), o.getString("target_id"), o.getString("created_at").take(16).replace("T", " ")))
+                    }
+                    auditLogs = list
+                }
+            }
         }
     }
 
@@ -268,7 +270,7 @@ fun VisualsAdminApp() {
             isLoading = true
             withContext(Dispatchers.IO) {
                 for ((idx, uri) in uris.withIndex()) {
-                    statusMsg = "جاري رفع ${idx + 1} من ${uris.size}..."
+                    statusMsg = tr("جاري رفع ${idx + 1}/${uris.size}...", "Uploading ${idx + 1}/${uris.size}...")
                     val input = context.contentResolver.openInputStream(uri) ?: continue
                     val orig = BitmapFactory.decodeStream(input)
                     input.close()
@@ -324,486 +326,525 @@ fun VisualsAdminApp() {
                         .addHeader("Authorization", "Bearer $token")
                         .build()
                     client.newCall(insReq).execute().close()
+                    logAdminAction(token, "upload_work", "work", slug, JSONObject().put("collection", col.slug))
                 }
                 loadDashboardData(token)
-                statusMsg = "تم رفع ${uris.size} عمل بنجاح إلى ${col.titleAr}!"
+                statusMsg = tr("تم رفع ${uris.size} عمل بنجاح!", "Uploaded ${uris.size} work(s)!")
             }
             isLoading = false
         }
     }
 
-    // Handle system Back button inside app
-    BackHandler(enabled = editingWork != null || activeTab != 0) {
-        if (editingWork != null) editingWork = null
-        else activeTab = 0
-    }
-
-    if (accessToken == null) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            if (updateVersion != null && updateApkUrl != null) {
-                Button(
-                    onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(updateApkUrl))) },
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Text("تحديث جديد متاح (v$updateVersion) - اضغط للتحميل")
-                }
-            }
-            Text("Visuals Admin", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = AccentGold)
-            Spacer(Modifier.height(6.dp))
-            Text("لوحة التحكم الشاملة", fontSize = 15.sp, color = MutedGray)
-            Spacer(Modifier.height(28.dp))
-
-            OutlinedTextField(
-                value = username,
-                onValueChange = { username = it },
-                label = { Text("اسم المستخدم أو البريد الإلكتروني") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = { Text("الرمز السري") },
-                visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth()
-            )
-            if (loginError != null) {
-                Spacer(Modifier.height(8.dp))
-                Text(loginError!!, color = DangerRed, fontSize = 13.sp)
-            }
-            Spacer(Modifier.height(20.dp))
-            Button(
-                onClick = {
-                    scope.launch {
-                        isLoading = true
-                        loginError = null
-                        val email = when {
-                            username.trim().equals("boda890", ignoreCase = true) -> "bodykhaled5000@gmail.com"
-                            username.trim().equals("admin", ignoreCase = true) -> "ahmedissam.personal@gmail.com"
-                            else -> username.trim()
-                        }
-                        val payload = JSONObject().put("email", email).put("password", password).toString()
-                        withContext(Dispatchers.IO) {
-                            val req = Request.Builder()
-                                .url("$SUPABASE_URL/auth/v1/token?grant_type=password")
-                                .post(payload.toRequestBody("application/json".toMediaType()))
-                                .addHeader("apikey", SUPABASE_ANON_KEY)
-                                .build()
-                            client.newCall(req).execute().use { resp ->
-                                val txt = resp.body?.string() ?: "{}"
-                                val json = JSONObject(txt)
-                                if (resp.isSuccessful && json.has("access_token")) {
-                                    val tok = json.getString("access_token")
-                                    accessToken = tok
-                                    loadDashboardData(tok)
-                                } else {
-                                    loginError = json.optString("error_description", "بيانات الدخول غير صحيحة")
-                                }
-                            }
-                        }
-                        isLoading = false
-                    }
-                },
-                enabled = !isLoading,
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text(if (isLoading) "جاري الدخول..." else "تسجيل الدخول")
+    CompositionLocalProvider(LocalLayoutDirection provides if (isAr) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+        BackHandler(enabled = editingWork != null || viewingCollection != null || activeTab != 0) {
+            when {
+                editingWork != null -> editingWork = null
+                viewingCollection != null -> viewingCollection = null
+                else -> activeTab = 0
             }
         }
-        return
-    }
 
-    Scaffold(
-        containerColor = BgDark,
-        topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceDark),
-                navigationIcon = {
-                    if (editingWork != null) {
-                        TextButton(onClick = { editingWork = null }) {
-                            Text("← رجوع", color = AccentGold, fontWeight = FontWeight.Bold)
-                        }
-                    } else if (activeTab != 0) {
-                        TextButton(onClick = { activeTab = 0 }) {
-                            Text("🏠 الرئيسية", color = AccentGold, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                },
-                title = {
-                    Text(
-                        when {
-                            editingWork != null -> "تعديل العمل"
-                            activeTab == 0 -> "الرئيسية"
-                            activeTab == 1 -> "إدارة الأعمال"
-                            activeTab == 2 -> "رفع جديد"
-                            activeTab == 3 -> "المجموعات"
-                            else -> "التعليقات"
-                        },
-                        color = TextIvory,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
-                },
-                actions = {
+        // Delete Collection Confirmation Dialog
+        val delCol = confirmDeleteCol
+        if (delCol != null) {
+            AlertDialog(
+                onDismissRequest = { confirmDeleteCol = null },
+                title = { Text(tr("تأكيد حذف المجموعة", "Confirm Delete Collection")) },
+                text = { Text(tr("هل أنت متأكد من حذف \"${delCol.titleAr}\" نهائياً مع كل أعمالها؟ لا يمكن التراجع.", "Permanently delete \"${delCol.titleEn}\" and its works? This cannot be undone.")) },
+                confirmButton = {
                     TextButton(onClick = {
-                        val tok = accessToken ?: return@TextButton
-                        scope.launch { loadDashboardData(tok) }
-                    }) { Text("🔄", fontSize = 18.sp) }
-                    TextButton(onClick = { accessToken = null; editingWork = null; activeTab = 0 }) {
-                        Text("خروج", color = MutedGray, fontSize = 13.sp)
-                    }
+                        val token = accessToken ?: return@TextButton
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                val req = Request.Builder()
+                                    .url("$SUPABASE_URL/rest/v1/collections?id=eq.${delCol.id}")
+                                    .delete()
+                                    .addHeader("apikey", SUPABASE_ANON_KEY)
+                                    .addHeader("Authorization", "Bearer $token")
+                                    .build()
+                                client.newCall(req).execute().close()
+                                logAdminAction(token, "delete_collection", "collection", delCol.slug)
+                                loadDashboardData(token)
+                            }
+                            if (viewingCollection?.id == delCol.id) viewingCollection = null
+                            confirmDeleteCol = null
+                        }
+                    }) { Text(tr("حذف نهائي", "Delete"), color = DangerRed) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmDeleteCol = null }) { Text(tr("إلغاء", "Cancel")) }
                 }
             )
-        },
-        bottomBar = {
-            NavigationBar(containerColor = SurfaceDark) {
-                val navItems = listOf("🏠 الرئيسية", "🖼 الأعمال", "⬆️ رفع", "📁 المجموعات", "💬 تعليقات")
-                navItems.forEachIndexed { idx, label ->
-                    NavigationBarItem(
-                        selected = editingWork == null && activeTab == idx,
-                        onClick = { editingWork = null; activeTab = idx },
-                        icon = { Text(label.substringBefore(" "), fontSize = 18.sp) },
-                        label = { Text(label.substringAfter(" "), fontSize = 11.sp) }
-                    )
-                }
-            }
         }
-    ) { innerPadding ->
-        Column(modifier = Modifier.fillMaxSize().padding(innerPadding).padding(16.dp)) {
-            if (updateVersion != null && updateApkUrl != null) {
+
+        if (accessToken == null) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { isAr = !isAr }) { Text(if (isAr) "EN" else "عربي", color = AccentGold) }
+                }
+                Image(
+                    painter = painterResource(R.drawable.ic_nb_projector),
+                    contentDescription = "Visuals Admin",
+                    modifier = Modifier.size(88.dp).clip(RoundedCornerShape(20.dp))
+                )
+                Spacer(Modifier.height(14.dp))
+                Text("Visuals Admin", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = AccentGold)
+                Text(tr("لوحة التحكم الشاملة", "Enterprise Visual Control"), fontSize = 14.sp, color = MutedGray)
+                Spacer(Modifier.height(24.dp))
+
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { username = it },
+                    label = { Text(tr("اسم المستخدم أو البريد الإلكتروني", "Username or Email")) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text(tr("الرمز السري", "Password")) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (loginError != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(loginError!!, color = DangerRed, fontSize = 13.sp)
+                }
+                Spacer(Modifier.height(20.dp))
                 Button(
-                    onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(updateApkUrl))) },
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Text("تحديث جديد متاح (v$updateVersion) - اضغط للتحميل")
+                    onClick = {
+                        scope.launch {
+                            isLoading = true
+                            loginError = null
+                            val email = when {
+                                username.trim().equals("boda890", ignoreCase = true) -> "bodykhaled5000@gmail.com"
+                                username.trim().equals("admin", ignoreCase = true) -> "ahmedissam.personal@gmail.com"
+                                else -> username.trim()
+                            }
+                            val payload = JSONObject().put("email", email).put("password", password).toString()
+                            withContext(Dispatchers.IO) {
+                                val req = Request.Builder()
+                                    .url("$SUPABASE_URL/auth/v1/token?grant_type=password")
+                                    .post(payload.toRequestBody("application/json".toMediaType()))
+                                    .addHeader("apikey", SUPABASE_ANON_KEY)
+                                    .build()
+                                client.newCall(req).execute().use { resp ->
+                                    val txt = resp.body?.string() ?: "{}"
+                                    val json = JSONObject(txt)
+                                    if (resp.isSuccessful && json.has("access_token")) {
+                                        val tok = json.getString("access_token")
+                                        val userObj = json.optJSONObject("user")
+                                        currentAdminId = userObj?.optString("id")
+                                        currentAdminName = if (email.startsWith("bodykhaled")) "boda890" else "admin"
+                                        accessToken = tok
+                                        loadDashboardData(tok)
+                                    } else {
+                                        loginError = tr("بيانات الدخول غير صحيحة", "Invalid credentials")
+                                    }
+                                }
+                            }
+                            isLoading = false
+                        }
+                    },
+                    enabled = !isLoading,
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text(if (isLoading) tr("جاري الدخول...", "Signing in...") else tr("تسجيل الدخول", "Sign In")) }
+            }
+            return@CompositionLocalProvider
+        }
+
+        Scaffold(
+            containerColor = BgDark,
+            topBar = {
+                TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = SurfaceDark),
+                    navigationIcon = {
+                        when {
+                            editingWork != null -> TextButton(onClick = { editingWork = null }) { Text(tr("رجوع", "Back"), color = AccentGold) }
+                            viewingCollection != null -> TextButton(onClick = { viewingCollection = null }) { Text(tr("رجوع", "Back"), color = AccentGold) }
+                            activeTab != 0 -> TextButton(onClick = { activeTab = 0 }) { Text(tr("الرئيسية", "Home"), color = AccentGold) }
+                        }
+                    },
+                    title = {
+                        Text(
+                            when {
+                                editingWork != null -> tr("تعديل العمل", "Edit Work")
+                                viewingCollection != null -> if (isAr) viewingCollection!!.titleAr else viewingCollection!!.titleEn
+                                activeTab == 0 -> tr("الرئيسية", "Dashboard")
+                                activeTab == 1 -> tr("الأعمال", "Works")
+                                activeTab == 2 -> tr("رفع جديد", "Upload")
+                                activeTab == 3 -> tr("المجموعات", "Collections")
+                                else -> tr("التعليقات", "Comments")
+                            },
+                            color = TextIvory, fontWeight = FontWeight.Bold, fontSize = 17.sp
+                        )
+                    },
+                    actions = {
+                        TextButton(onClick = { isAr = !isAr }) { Text(if (isAr) "EN" else "عربي", color = AccentGold, fontSize = 12.sp) }
+                        TextButton(onClick = {
+                            val tok = accessToken ?: return@TextButton
+                            scope.launch { loadDashboardData(tok) }
+                        }) { Text("🔄", fontSize = 16.sp) }
+                        TextButton(onClick = { accessToken = null; editingWork = null; viewingCollection = null; activeTab = 0 }) {
+                            Text(tr("خروج", "Out"), color = MutedGray, fontSize = 12.sp)
+                        }
+                    }
+                )
+            },
+            bottomBar = {
+                NavigationBar(containerColor = SurfaceDark) {
+                    val navItems = listOf(
+                        "🏠" to tr("الرئيسية", "Home"),
+                        "🖼" to tr("الأعمال", "Works"),
+                        "⬆️" to tr("رفع", "Upload"),
+                        "📁" to tr("المجموعات", "Sets"),
+                        "💬" to tr("تعليقات", "Chat")
+                    )
+                    navItems.forEachIndexed { idx, (ico, lbl) ->
+                        NavigationBarItem(
+                            selected = editingWork == null && viewingCollection == null && activeTab == idx,
+                            onClick = { editingWork = null; viewingCollection = null; activeTab = idx },
+                            icon = { Text(ico, fontSize = 17.sp) },
+                            label = { Text(lbl, fontSize = 10.sp) }
+                        )
+                    }
                 }
             }
-
-            val currentEdit = editingWork
-            if (currentEdit != null) {
-                // Full Work Editor Screen
-                var editAr by remember(currentEdit.id) { mutableStateOf(currentEdit.titleAr) }
-                var editEn by remember(currentEdit.id) { mutableStateOf(currentEdit.titleEn) }
-                var editOrigin by remember(currentEdit.id) { mutableStateOf(currentEdit.origin) }
-                var editColId by remember(currentEdit.id) { mutableStateOf(currentEdit.collectionId) }
-                var editPub by remember(currentEdit.id) { mutableStateOf(currentEdit.isPublished) }
-                var editFeat by remember(currentEdit.id) { mutableStateOf(currentEdit.isFeatured) }
-
-                Column(
-                    modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    AsyncImage(
-                        model = currentEdit.fullUrl,
-                        contentDescription = editAr,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxWidth().height(260.dp).clip(RoundedCornerShape(12.dp)).background(SurfaceDark)
-                    )
-                    OutlinedTextField(value = editAr, onValueChange = { editAr = it }, label = { Text("العنوان بالعربي") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(value = editEn, onValueChange = { editEn = it }, label = { Text("العنوان بالإنجليزي") }, modifier = Modifier.fillMaxWidth())
-
-                    Text("الأصل (Origin):", color = MutedGray, fontSize = 13.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("camera" to "📷 كاميرا", "ai" to "✨ ذكاء اصطناعي", "design" to "🎨 تصميم").forEach { (orig, lbl) ->
-                            FilterChip(selected = editOrigin == orig, onClick = { editOrigin = orig }, label = { Text(lbl) })
-                        }
-                    }
-
-                    Text("المجموعة:", color = MutedGray, fontSize = 13.sp)
-                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        collections.forEach { col ->
-                            FilterChip(selected = editColId == col.id, onClick = { editColId = col.id }, label = { Text(col.titleAr) })
-                        }
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        FilterChip(selected = editPub, onClick = { editPub = !editPub }, label = { Text(if (editPub) "منشور ✓" else "مؤرشف") })
-                        FilterChip(selected = editFeat, onClick = { editFeat = !editFeat }, label = { Text(if (editFeat) "مميز ★" else "عادي ☆") })
-                    }
-
+        ) { innerPadding ->
+            Column(modifier = Modifier.fillMaxSize().padding(innerPadding).padding(16.dp)) {
+                if (updateVersion != null && updateApkUrl != null) {
                     Button(
-                        onClick = {
-                            val token = accessToken ?: return@Button
-                            scope.launch {
-                                withContext(Dispatchers.IO) {
-                                    val body = JSONObject().apply {
-                                        put("title_ar", editAr.trim())
-                                        put("title_en", editEn.trim())
-                                        put("origin", editOrigin)
-                                        put("collection_id", editColId)
-                                        put("is_published", editPub)
-                                        put("is_featured", editFeat)
-                                    }
-                                    val req = Request.Builder()
-                                        .url("$SUPABASE_URL/rest/v1/works?id=eq.${currentEdit.id}")
-                                        .patch(body.toString().toRequestBody("application/json".toMediaType()))
-                                        .addHeader("apikey", SUPABASE_ANON_KEY)
-                                        .addHeader("Authorization", "Bearer $token")
-                                        .build()
-                                    client.newCall(req).execute().close()
-                                    loadDashboardData(token)
-                                }
-                                editingWork = null
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth().height(50.dp),
-                        shape = RoundedCornerShape(12.dp)
-                    ) { Text("حفظ التعديلات") }
-
-                    OutlinedButton(
-                        onClick = {
-                            val token = accessToken ?: return@OutlinedButton
-                            scope.launch {
-                                withContext(Dispatchers.IO) {
-                                    val req = Request.Builder()
-                                        .url("$SUPABASE_URL/rest/v1/works?id=eq.${currentEdit.id}")
-                                        .delete()
-                                        .addHeader("apikey", SUPABASE_ANON_KEY)
-                                        .addHeader("Authorization", "Bearer $token")
-                                        .build()
-                                    client.newCall(req).execute().close()
-                                    loadDashboardData(token)
-                                }
-                                editingWork = null
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = DangerRed)
-                    ) { Text("حذف العمل نهائياً") }
+                        onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(updateApkUrl))) },
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                        shape = RoundedCornerShape(10.dp)
+                    ) { Text(tr("تحديث جديد متاح (v$updateVersion) - اضغط للتحميل", "Update v$updateVersion available - Tap to install")) }
                 }
-            } else {
-                when (activeTab) {
-                    0 -> {
-                        // Home Overview
-                        val pubWorks = works.count { it.isPublished }
-                        val archWorks = works.count { !it.isPublished }
-                        val featWorks = works.count { it.isFeatured }
 
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                StatCard("المجموعات", collections.size.toString(), Modifier.weight(1f))
-                                StatCard("منشور", pubWorks.toString(), Modifier.weight(1f))
-                                StatCard("مؤرشف", archWorks.toString(), Modifier.weight(1f))
+                val currentEdit = editingWork
+                val currentCol = viewingCollection
+
+                if (currentEdit != null) {
+                    // Full Work Editor
+                    var editAr by remember(currentEdit.id) { mutableStateOf(currentEdit.titleAr) }
+                    var editEn by remember(currentEdit.id) { mutableStateOf(currentEdit.titleEn) }
+                    var editOrigin by remember(currentEdit.id) { mutableStateOf(currentEdit.origin) }
+                    var editColId by remember(currentEdit.id) { mutableStateOf(currentEdit.collectionId) }
+                    var editPub by remember(currentEdit.id) { mutableStateOf(currentEdit.isPublished) }
+                    var editFeat by remember(currentEdit.id) { mutableStateOf(currentEdit.isFeatured) }
+
+                    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        AsyncImage(model = currentEdit.fullUrl, contentDescription = editAr, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth().height(250.dp).clip(RoundedCornerShape(12.dp)).background(SurfaceDark))
+                        OutlinedTextField(value = editAr, onValueChange = { editAr = it }, label = { Text(tr("العنوان بالعربي", "Arabic Title")) }, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(value = editEn, onValueChange = { editEn = it }, label = { Text(tr("العنوان بالإنجليزي", "English Title")) }, modifier = Modifier.fillMaxWidth())
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("camera" to tr("📷 كاميرا", "📷 Camera"), "ai" to tr("✨ ذكاء", "✨ AI"), "design" to tr("🎨 تصميم", "🎨 Design")).forEach { (orig, lbl) ->
+                                FilterChip(selected = editOrigin == orig, onClick = { editOrigin = orig }, label = { Text(lbl) })
                             }
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                StatCard("مختارات ★", featWorks.toString(), Modifier.weight(1f))
-                                StatCard("التعليقات", comments.size.toString(), Modifier.weight(1f))
+                        }
+                        Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            collections.forEach { col ->
+                                FilterChip(selected = editColId == col.id, onClick = { editColId = col.id }, label = { Text(if (isAr) col.titleAr else col.titleEn) })
                             }
-                            Spacer(Modifier.height(6.dp))
-                            Text("اختصارات سريعة", color = MutedGray, fontSize = 13.sp)
-                            Button(onClick = { activeTab = 2 }, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(12.dp)) {
-                                Text("⬆️ رفع صور جديدة من المعرض")
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            FilterChip(selected = editPub, onClick = { editPub = !editPub }, label = { Text(if (editPub) tr("منشور ✓", "Published ✓") else tr("مؤرشف", "Archived")) })
+                            FilterChip(selected = editFeat, onClick = { editFeat = !editFeat }, label = { Text(if (editFeat) tr("مميز ★", "Featured ★") else tr("عادي ☆", "Standard ☆")) })
+                        }
+                        Button(
+                            onClick = {
+                                val token = accessToken ?: return@Button
+                                scope.launch {
+                                    withContext(Dispatchers.IO) {
+                                        val body = JSONObject().apply {
+                                            put("title_ar", editAr.trim())
+                                            put("title_en", editEn.trim())
+                                            put("origin", editOrigin)
+                                            put("collection_id", editColId)
+                                            put("is_published", editPub)
+                                            put("is_featured", editFeat)
+                                        }
+                                        val req = Request.Builder().url("$SUPABASE_URL/rest/v1/works?id=eq.${currentEdit.id}").patch(body.toString().toRequestBody("application/json".toMediaType())).addHeader("apikey", SUPABASE_ANON_KEY).addHeader("Authorization", "Bearer $token").build()
+                                        client.newCall(req).execute().close()
+                                        logAdminAction(token, "update_work", "work", currentEdit.slug, JSONObject().put("published", editPub).put("featured", editFeat))
+                                        loadDashboardData(token)
+                                    }
+                                    editingWork = null
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(12.dp)
+                        ) { Text(tr("حفظ التعديلات", "Save Changes")) }
+                        OutlinedButton(
+                            onClick = {
+                                val token = accessToken ?: return@OutlinedButton
+                                scope.launch {
+                                    withContext(Dispatchers.IO) {
+                                        val req = Request.Builder().url("$SUPABASE_URL/rest/v1/works?id=eq.${currentEdit.id}").delete().addHeader("apikey", SUPABASE_ANON_KEY).addHeader("Authorization", "Bearer $token").build()
+                                        client.newCall(req).execute().close()
+                                        logAdminAction(token, "delete_work", "work", currentEdit.slug)
+                                        loadDashboardData(token)
+                                    }
+                                    editingWork = null
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors(contentColor = DangerRed)
+                        ) { Text(tr("حذف العمل نهائياً", "Delete Work Permanently")) }
+                    }
+                } else if (currentCol != null) {
+                    // Collection Detail Screen: Browse Works + Toggle Publish/Hide + Delete
+                    val colWorks = works.filter { it.collectionId == currentCol.id }
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().background(SurfaceCard, RoundedCornerShape(12.dp)).padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(if (isAr) currentCol.titleAr else currentCol.titleEn, color = TextIvory, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text("${colWorks.size} ${tr("عمل", "works")} • ${if (currentCol.isPublished) tr("منشورة", "Published") else tr("مخفية", "Hidden")}", color = AccentGold, fontSize = 12.sp)
                             }
-                            OutlinedButton(onClick = { activeTab = 1 }, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(12.dp)) {
-                                Text("🖼 استعراض وتعديل الأعمال")
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Button(
+                                    onClick = {
+                                        val token = accessToken ?: return@Button
+                                        val nextPub = !currentCol.isPublished
+                                        scope.launch {
+                                            withContext(Dispatchers.IO) {
+                                                val body = JSONObject().put("is_published", nextPub).toString()
+                                                val req = Request.Builder().url("$SUPABASE_URL/rest/v1/collections?id=eq.${currentCol.id}").patch(body.toRequestBody("application/json".toMediaType())).addHeader("apikey", SUPABASE_ANON_KEY).addHeader("Authorization", "Bearer $token").build()
+                                                client.newCall(req).execute().close()
+                                                logAdminAction(token, if (nextPub) "publish_collection" else "hide_collection", "collection", currentCol.slug)
+                                                loadDashboardData(token)
+                                            }
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(8.dp)
+                                ) { Text(if (currentCol.isPublished) tr("إخفاء", "Hide") else tr("نشر", "Publish"), fontSize = 12.sp) }
+                                OutlinedButton(
+                                    onClick = { confirmDeleteCol = currentCol },
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = DangerRed),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) { Text(tr("حذف", "Del"), fontSize = 12.sp) }
                             }
-                            OutlinedButton(onClick = { activeTab = 3 }, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(12.dp)) {
-                                Text("📁 إدارة المجموعات")
-                            }
-                            OutlinedButton(
-                                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://ahmedissamramadan.github.io/visuals/"))) },
-                                modifier = Modifier.fillMaxWidth().height(48.dp),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text("🌐 فتح الموقع المباشر")
+                        }
+
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(colWorks) { w ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().background(SurfaceCard, RoundedCornerShape(10.dp)).clickable { editingWork = w }.padding(10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    AsyncImage(model = w.thumbUrl, contentDescription = w.titleAr, contentScale = ContentScale.Crop, modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceDark))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(if (isAr) w.titleAr.ifBlank { w.titleEn } else w.titleEn.ifBlank { w.titleAr }, color = if (w.isPublished) TextIvory else MutedGray, fontWeight = FontWeight.Medium)
+                                        Text("${w.origin.uppercase()} • ${w.qualityScore}%", color = AccentGold, fontSize = 11.sp)
+                                    }
+                                    Text(if (w.isFeatured) "★" else "✏️", fontSize = 16.sp, color = AccentGold)
+                                }
                             }
                         }
                     }
-                    1 -> {
-                        // Works Management
-                        val filtered = works.filter { w ->
-                            val matchStatus = when (workStatusFilter) {
-                                "published" -> w.isPublished
-                                "archived" -> !w.isPublished
-                                "featured" -> w.isFeatured
-                                else -> true
-                            }
-                            val q = workSearch.trim().lowercase()
-                            val matchQ = q.isEmpty() || w.titleAr.lowercase().contains(q) || w.titleEn.lowercase().contains(q)
-                            matchStatus && matchQ
-                        }
-
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            OutlinedTextField(
-                                value = workSearch,
-                                onValueChange = { workSearch = it },
-                                label = { Text("بحث في الأعمال...") },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf("all" to "الكل", "published" to "منشور", "archived" to "مؤرشف", "featured" to "مميز ★").forEach { (k, lbl) ->
-                                    FilterChip(selected = workStatusFilter == k, onClick = { workStatusFilter = k }, label = { Text(lbl) })
+                } else {
+                    when (activeTab) {
+                        0 -> {
+                            // Dashboard + Audit Log
+                            val pubWorks = works.count { it.isPublished }
+                            val archWorks = works.count { !it.isPublished }
+                            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                item {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Image(painter = painterResource(R.drawable.ic_nb_home), contentDescription = null, modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)))
+                                        Column {
+                                            Text(tr("مرحباً، $currentAdminName", "Welcome, $currentAdminName"), color = TextIvory, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                            Text(tr("كل الإجراءات تُسجل تلقائياً في سجل النشاط", "All actions are logged in Audit Trail"), color = MutedGray, fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                                item {
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        StatCard(tr("المجموعات", "Sets"), collections.size.toString(), Modifier.weight(1f))
+                                        StatCard(tr("منشور", "Live"), pubWorks.toString(), Modifier.weight(1f))
+                                        StatCard(tr("مؤرشف", "Hidden"), archWorks.toString(), Modifier.weight(1f))
+                                    }
+                                }
+                                item {
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(onClick = { activeTab = 2 }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) { Text(tr("⬆️ رفع صور", "⬆️ Upload")) }
+                                        OutlinedButton(onClick = { activeTab = 3 }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp)) { Text(tr("📁 المجموعات", "📁 Sets")) }
+                                    }
+                                }
+                                item {
+                                    Text(tr("سجل نشاط الأدمن (Audit Log)", "Admin Audit Log"), color = AccentGold, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                                items(auditLogs) { log ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().background(SurfaceCard, RoundedCornerShape(8.dp)).padding(10.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("${log.adminName} → ${log.action}", color = TextIvory, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                            Text("${log.targetType}: ${log.targetId}", color = MutedGray, fontSize = 11.sp)
+                                        }
+                                        Text(log.createdAt, color = AccentGold, fontSize = 10.sp)
+                                    }
                                 }
                             }
-                            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                items(filtered) { w ->
+                        }
+                        1 -> {
+                            val filtered = works.filter { w ->
+                                val matchStatus = when (workStatusFilter) {
+                                    "published" -> w.isPublished
+                                    "archived" -> !w.isPublished
+                                    "featured" -> w.isFeatured
+                                    else -> true
+                                }
+                                val q = workSearch.trim().lowercase()
+                                val matchQ = q.isEmpty() || w.titleAr.lowercase().contains(q) || w.titleEn.lowercase().contains(q)
+                                matchStatus && matchQ
+                            }
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                OutlinedTextField(value = workSearch, onValueChange = { workSearch = it }, label = { Text(tr("بحث في الأعمال...", "Search works...")) }, modifier = Modifier.fillMaxWidth())
+                                Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    listOf("all" to tr("الكل", "All"), "published" to tr("منشور", "Live"), "archived" to tr("مؤرشف", "Hidden"), "featured" to tr("مميز ★", "Star ★")).forEach { (k, lbl) ->
+                                        FilterChip(selected = workStatusFilter == k, onClick = { workStatusFilter = k }, label = { Text(lbl) })
+                                    }
+                                }
+                                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    items(filtered) { w ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().background(SurfaceCard, RoundedCornerShape(10.dp)).clickable { editingWork = w }.padding(10.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            AsyncImage(model = w.thumbUrl, contentDescription = w.titleAr, contentScale = ContentScale.Crop, modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceDark))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(if (isAr) w.titleAr.ifBlank { w.titleEn } else w.titleEn.ifBlank { w.titleAr }, color = if (w.isPublished) TextIvory else MutedGray, fontWeight = FontWeight.Medium)
+                                                Text("${w.origin.uppercase()} • ${w.qualityScore}%", color = AccentGold, fontSize = 11.sp)
+                                            }
+                                            Text(if (w.isFeatured) "★" else "✏️", fontSize = 16.sp, color = AccentGold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        2 -> {
+                            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text(tr("1. اختر المجموعة:", "1. Select Collection:"), color = MutedGray, fontSize = 13.sp)
+                                Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    collections.forEachIndexed { idx, col ->
+                                        FilterChip(selected = selectedColIndex == idx, onClick = { selectedColIndex = idx }, label = { Text(if (isAr) col.titleAr else col.titleEn) })
+                                    }
+                                }
+                                Text(tr("2. اختر الأصل:", "2. Select Origin:"), color = MutedGray, fontSize = 13.sp)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    listOf("camera" to tr("📷 كاميرا", "📷 Camera"), "ai" to tr("✨ ذكاء", "✨ AI"), "design" to tr("🎨 تصميم", "🎨 Design")).forEach { (orig, lbl) ->
+                                        FilterChip(selected = selectedOrigin == orig, onClick = { selectedOrigin = orig }, label = { Text(lbl) })
+                                    }
+                                }
+                                OutlinedTextField(value = uploadTitleAr, onValueChange = { uploadTitleAr = it }, label = { Text(tr("العنوان بالعربي (اختياري)", "Arabic Title (optional)")) }, modifier = Modifier.fillMaxWidth())
+                                OutlinedTextField(value = uploadTitleEn, onValueChange = { uploadTitleEn = it }, label = { Text(tr("العنوان بالإنجليزي (اختياري)", "English Title (optional)")) }, modifier = Modifier.fillMaxWidth())
+                                Button(onClick = { picker.launch("image/*") }, enabled = !isLoading, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(12.dp)) {
+                                    Text(if (isLoading) tr("جاري الرفع...", "Uploading...") else tr("اختيار صور من المعرض ورفعها", "Pick Images & Upload"))
+                                }
+                                if (statusMsg.isNotBlank()) Text(statusMsg, color = AccentGold, fontSize = 14.sp)
+                            }
+                        }
+                        3 -> {
+                            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                item {
+                                    Column(modifier = Modifier.fillMaxWidth().background(SurfaceCard, RoundedCornerShape(12.dp)).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text(tr("إنشاء مجموعة جديدة", "New Collection"), color = AccentGold, fontWeight = FontWeight.Bold)
+                                        OutlinedTextField(value = newColSlug, onValueChange = { newColSlug = it }, label = { Text("Slug") }, modifier = Modifier.fillMaxWidth())
+                                        OutlinedTextField(value = newColAr, onValueChange = { newColAr = it }, label = { Text(tr("الاسم بالعربي", "Arabic Title")) }, modifier = Modifier.fillMaxWidth())
+                                        OutlinedTextField(value = newColEn, onValueChange = { newColEn = it }, label = { Text(tr("الاسم بالإنجليزي", "English Title")) }, modifier = Modifier.fillMaxWidth())
+                                        Button(
+                                            onClick = {
+                                                val token = accessToken ?: return@Button
+                                                scope.launch {
+                                                    withContext(Dispatchers.IO) {
+                                                        val slug = newColSlug.trim()
+                                                        val body = JSONObject().apply {
+                                                            put("slug", slug)
+                                                            put("title_en", newColEn.trim())
+                                                            put("title_ar", newColAr.trim())
+                                                            put("year", 2026)
+                                                            put("sort_order", collections.size + 1)
+                                                            put("is_published", true)
+                                                        }
+                                                        val req = Request.Builder().url("$SUPABASE_URL/rest/v1/collections").post(body.toString().toRequestBody("application/json".toMediaType())).addHeader("apikey", SUPABASE_ANON_KEY).addHeader("Authorization", "Bearer $token").build()
+                                                        client.newCall(req).execute().close()
+                                                        logAdminAction(token, "create_collection", "collection", slug)
+                                                        loadDashboardData(token)
+                                                    }
+                                                    newColSlug = ""; newColEn = ""; newColAr = ""
+                                                }
+                                            },
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) { Text(tr("إنشاء المجموعة", "Create Collection")) }
+                                    }
+                                }
+                                items(collections) { c ->
+                                    val count = works.count { it.collectionId == c.id }
                                     Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(SurfaceCard, RoundedCornerShape(10.dp))
-                                            .clickable { editingWork = w }
-                                            .padding(10.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        modifier = Modifier.fillMaxWidth().background(SurfaceCard, RoundedCornerShape(10.dp)).clickable { viewingCollection = c }.padding(12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        AsyncImage(
-                                            model = w.thumbUrl,
-                                            contentDescription = w.titleAr,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceDark)
-                                        )
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text(w.titleAr.ifBlank { w.titleEn }, color = if (w.isPublished) TextIvory else MutedGray, fontWeight = FontWeight.Medium)
-                                            Text("${w.origin.uppercase()} • ${w.qualityScore}% • اضغط للتعديل", color = AccentGold, fontSize = 11.sp)
+                                            Text(if (isAr) c.titleAr else c.titleEn, color = if (c.isPublished) TextIvory else MutedGray, fontWeight = FontWeight.SemiBold)
+                                            Text("$count ${tr("عمل", "works")} • ${if (c.isPublished) tr("منشورة", "Published") else tr("مخفية", "Hidden")}", color = AccentGold, fontSize = 11.sp)
                                         }
-                                        Text(if (w.isFeatured) "★" else "✏️", fontSize = 18.sp, color = AccentGold)
+                                        Row {
+                                            TextButton(onClick = {
+                                                val token = accessToken ?: return@TextButton
+                                                val nextPub = !c.isPublished
+                                                scope.launch {
+                                                    withContext(Dispatchers.IO) {
+                                                        val body = JSONObject().put("is_published", nextPub).toString()
+                                                        val req = Request.Builder().url("$SUPABASE_URL/rest/v1/collections?id=eq.${c.id}").patch(body.toRequestBody("application/json".toMediaType())).addHeader("apikey", SUPABASE_ANON_KEY).addHeader("Authorization", "Bearer $token").build()
+                                                        client.newCall(req).execute().close()
+                                                        logAdminAction(token, if (nextPub) "publish_collection" else "hide_collection", "collection", c.slug)
+                                                        loadDashboardData(token)
+                                                    }
+                                                }
+                                            }) { Text(if (c.isPublished) tr("إخفاء", "Hide") else tr("نشر", "Publish"), color = if (c.isPublished) MutedGray else AccentGold) }
+                                            TextButton(onClick = { confirmDeleteCol = c }) { Text(tr("حذف", "Del"), color = DangerRed) }
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                    2 -> {
-                        // Upload Tab
-                        Column(
-                            modifier = Modifier.verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Text("1. اختر المجموعة:", color = MutedGray, fontSize = 13.sp)
-                            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                collections.forEachIndexed { idx, col ->
-                                    FilterChip(selected = selectedColIndex == idx, onClick = { selectedColIndex = idx }, label = { Text(col.titleAr) })
-                                }
-                            }
-                            Text("2. اختر الأصل:", color = MutedGray, fontSize = 13.sp)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf("camera" to "📷 كاميرا", "ai" to "✨ ذكاء اصطناعي", "design" to "🎨 تصميم").forEach { (orig, lbl) ->
-                                    FilterChip(selected = selectedOrigin == orig, onClick = { selectedOrigin = orig }, label = { Text(lbl) })
-                                }
-                            }
-                            OutlinedTextField(value = uploadTitleAr, onValueChange = { uploadTitleAr = it }, label = { Text("العنوان بالعربي (اختياري)") }, modifier = Modifier.fillMaxWidth())
-                            OutlinedTextField(value = uploadTitleEn, onValueChange = { uploadTitleEn = it }, label = { Text("العنوان بالإنجليزي (اختياري)") }, modifier = Modifier.fillMaxWidth())
-                            Button(
-                                onClick = { picker.launch("image/*") },
-                                enabled = !isLoading,
-                                modifier = Modifier.fillMaxWidth().height(54.dp),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text(if (isLoading) "جاري الرفع..." else "اختيار صور من المعرض ورفعها")
-                            }
-                            if (statusMsg.isNotBlank()) {
-                                Text(statusMsg, color = AccentGold, fontSize = 14.sp)
-                            }
-                        }
-                    }
-                    3 -> {
-                        // Collections Management
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            item {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth().background(SurfaceCard, RoundedCornerShape(12.dp)).padding(14.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text("إنشاء مجموعة جديدة", color = AccentGold, fontWeight = FontWeight.Bold)
-                                    OutlinedTextField(value = newColSlug, onValueChange = { newColSlug = it }, label = { Text("الرابط المختصر (slug)") }, modifier = Modifier.fillMaxWidth())
-                                    OutlinedTextField(value = newColAr, onValueChange = { newColAr = it }, label = { Text("الاسم بالعربي") }, modifier = Modifier.fillMaxWidth())
-                                    OutlinedTextField(value = newColEn, onValueChange = { newColEn = it }, label = { Text("الاسم بالإنجليزي") }, modifier = Modifier.fillMaxWidth())
-                                    Button(
-                                        onClick = {
-                                            val token = accessToken ?: return@Button
+                        4 -> {
+                            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(comments) { c ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().background(SurfaceCard, RoundedCornerShape(10.dp)).padding(12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("${c.author} • ${c.workTitle}", color = AccentGold, fontSize = 12.sp)
+                                            Text(c.body, color = if (c.isHidden) MutedGray else TextIvory, fontSize = 14.sp)
+                                        }
+                                        TextButton(onClick = {
+                                            val token = accessToken ?: return@TextButton
+                                            val nextHide = !c.isHidden
                                             scope.launch {
                                                 withContext(Dispatchers.IO) {
-                                                    val body = JSONObject().apply {
-                                                        put("slug", newColSlug.trim())
-                                                        put("title_en", newColEn.trim())
-                                                        put("title_ar", newColAr.trim())
-                                                        put("year", 2026)
-                                                        put("sort_order", collections.size + 1)
-                                                        put("is_published", true)
-                                                    }
-                                                    val req = Request.Builder()
-                                                        .url("$SUPABASE_URL/rest/v1/collections")
-                                                        .post(body.toString().toRequestBody("application/json".toMediaType()))
-                                                        .addHeader("apikey", SUPABASE_ANON_KEY)
-                                                        .addHeader("Authorization", "Bearer $token")
-                                                        .build()
+                                                    val body = JSONObject().put("is_hidden", nextHide).toString()
+                                                    val req = Request.Builder().url("$SUPABASE_URL/rest/v1/comments?id=eq.${c.id}").patch(body.toRequestBody("application/json".toMediaType())).addHeader("apikey", SUPABASE_ANON_KEY).addHeader("Authorization", "Bearer $token").build()
                                                     client.newCall(req).execute().close()
+                                                    logAdminAction(token, if (nextHide) "hide_comment" else "unhide_comment", "comment", c.id)
                                                     loadDashboardData(token)
                                                 }
-                                                newColSlug = ""; newColEn = ""; newColAr = ""
                                             }
-                                        },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) { Text("إنشاء المجموعة") }
-                                }
-                            }
-                            items(collections) { c ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().background(SurfaceCard, RoundedCornerShape(10.dp)).padding(12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(c.titleAr, color = if (c.isPublished) TextIvory else MutedGray, fontWeight = FontWeight.SemiBold)
-                                        Text("${c.titleEn} (${c.slug})", color = MutedGray, fontSize = 12.sp)
+                                        }) { Text(if (c.isHidden) tr("إظهار", "Show") else tr("إخفاء", "Hide")) }
                                     }
-                                    TextButton(onClick = {
-                                        val token = accessToken ?: return@TextButton
-                                        scope.launch {
-                                            withContext(Dispatchers.IO) {
-                                                val body = JSONObject().put("is_published", !c.isPublished).toString()
-                                                val req = Request.Builder()
-                                                    .url("$SUPABASE_URL/rest/v1/collections?id=eq.${c.id}")
-                                                    .patch(body.toRequestBody("application/json".toMediaType()))
-                                                    .addHeader("apikey", SUPABASE_ANON_KEY)
-                                                    .addHeader("Authorization", "Bearer $token")
-                                                    .build()
-                                                client.newCall(req).execute().close()
-                                                loadDashboardData(token)
-                                            }
-                                        }
-                                    }) {
-                                        Text(if (c.isPublished) "إخفاء" else "نشر", color = if (c.isPublished) DangerRed else AccentGold)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    4 -> {
-                        // Comments Moderation
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(comments) { c ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().background(SurfaceCard, RoundedCornerShape(10.dp)).padding(12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text("${c.author} • ${c.workTitle}", color = AccentGold, fontSize = 12.sp)
-                                        Text(c.body, color = if (c.isHidden) MutedGray else TextIvory, fontSize = 14.sp)
-                                    }
-                                    TextButton(onClick = {
-                                        val token = accessToken ?: return@TextButton
-                                        scope.launch {
-                                            withContext(Dispatchers.IO) {
-                                                val body = JSONObject().put("is_hidden", !c.isHidden).toString()
-                                                val req = Request.Builder()
-                                                    .url("$SUPABASE_URL/rest/v1/comments?id=eq.${c.id}")
-                                                    .patch(body.toRequestBody("application/json".toMediaType()))
-                                                    .addHeader("apikey", SUPABASE_ANON_KEY)
-                                                    .addHeader("Authorization", "Bearer $token")
-                                                    .build()
-                                                client.newCall(req).execute().close()
-                                                loadDashboardData(token)
-                                            }
-                                        }
-                                    }) { Text(if (c.isHidden) "إظهار" else "إخفاء") }
                                 }
                             }
                         }
