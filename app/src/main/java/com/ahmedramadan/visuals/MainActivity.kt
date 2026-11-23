@@ -53,7 +53,7 @@ private val MutedGray = Color(0xFF9A958C)
 private val DangerRed = Color(0xFFE06C75)
 
 data class CollectionItem(val id: String, val slug: String, val titleEn: String, val titleAr: String)
-data class WorkItem(val id: String, val slug: String, val titleEn: String, val origin: String, val collectionId: String, val thumbUrl: String)
+data class WorkItem(val id: String, val slug: String, val titleEn: String, val origin: String, val collectionId: String, val thumbUrl: String, val isPublished: Boolean, val isFeatured: Boolean, val qualityScore: Int)
 data class CommentItem(val id: String, val body: String, val isHidden: Boolean, val author: String, val workTitle: String)
 
 class MainActivity : ComponentActivity() {
@@ -123,7 +123,7 @@ fun VisualsAdminApp() {
             }
 
             val workReq = Request.Builder()
-                .url("$SUPABASE_URL/rest/v1/works?select=id,slug,title_en,origin,collection_id,image_urls&order=created_at.desc&limit=100")
+                .url("$SUPABASE_URL/rest/v1/works?select=id,slug,title_en,origin,collection_id,image_urls,is_published,is_featured,quality_score&order=created_at.desc&limit=100")
                 .addHeader("apikey", SUPABASE_ANON_KEY)
                 .addHeader("Authorization", "Bearer $token")
                 .build()
@@ -135,7 +135,19 @@ fun VisualsAdminApp() {
                         val o = arr.getJSONObject(i)
                         val imgs = o.optJSONObject("image_urls")
                         val thumb = imgs?.optString("480")?.ifBlank { imgs.optString("1200", "") } ?: ""
-                        list.add(WorkItem(o.getString("id"), o.getString("slug"), o.optString("title_en", ""), o.getString("origin"), o.getString("collection_id"), thumb))
+                        list.add(
+                            WorkItem(
+                                o.getString("id"),
+                                o.getString("slug"),
+                                o.optString("title_en", ""),
+                                o.getString("origin"),
+                                o.getString("collection_id"),
+                                thumb,
+                                o.optBoolean("is_published", true),
+                                o.optBoolean("is_featured", false),
+                                o.optInt("quality_score", 85)
+                            )
+                        )
                     }
                     works = list
                 }
@@ -386,16 +398,17 @@ fun VisualsAdminApp() {
                                     modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceDark)
                                 )
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(w.titleEn.ifBlank { w.slug }, color = TextIvory, fontWeight = FontWeight.Medium)
-                                    Text(w.origin.uppercase(), color = AccentGold, fontSize = 11.sp)
+                                    Text(w.titleEn.ifBlank { w.slug }, color = if (w.isPublished) TextIvory else MutedGray, fontWeight = FontWeight.Medium)
+                                    Text("${w.origin.uppercase()} • Score ${w.qualityScore}%", color = AccentGold, fontSize = 11.sp)
                                 }
                                 TextButton(onClick = {
                                     val token = accessToken ?: return@TextButton
                                     scope.launch {
                                         withContext(Dispatchers.IO) {
+                                            val body = JSONObject().put("is_featured", !w.isFeatured).toString()
                                             val req = Request.Builder()
                                                 .url("$SUPABASE_URL/rest/v1/works?id=eq.${w.id}")
-                                                .delete()
+                                                .patch(body.toRequestBody("application/json".toMediaType()))
                                                 .addHeader("apikey", SUPABASE_ANON_KEY)
                                                 .addHeader("Authorization", "Bearer $token")
                                                 .build()
@@ -403,7 +416,23 @@ fun VisualsAdminApp() {
                                             loadDashboardData(token)
                                         }
                                     }
-                                }) { Text("Delete", color = DangerRed) }
+                                }) { Text(if (w.isFeatured) "★" else "☆", color = AccentGold) }
+                                TextButton(onClick = {
+                                    val token = accessToken ?: return@TextButton
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            val body = JSONObject().put("is_published", !w.isPublished).toString()
+                                            val req = Request.Builder()
+                                                .url("$SUPABASE_URL/rest/v1/works?id=eq.${w.id}")
+                                                .patch(body.toRequestBody("application/json".toMediaType()))
+                                                .addHeader("apikey", SUPABASE_ANON_KEY)
+                                                .addHeader("Authorization", "Bearer $token")
+                                                .build()
+                                            client.newCall(req).execute().close()
+                                            loadDashboardData(token)
+                                        }
+                                    }
+                                }) { Text(if (w.isPublished) "Archive" else "Publish", color = if (w.isPublished) DangerRed else AccentGold) }
                             }
                         }
                     }
