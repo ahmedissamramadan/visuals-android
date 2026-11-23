@@ -11,9 +11,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -41,11 +43,14 @@ private const val SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJp
 
 private val BgDark = Color(0xFF0B0B0D)
 private val SurfaceDark = Color(0xFF131317)
+private val SurfaceCard = Color(0xFF1B1B21)
 private val AccentGold = Color(0xFFC8A46E)
 private val TextIvory = Color(0xFFF3EFE6)
 private val MutedGray = Color(0xFF9A958C)
+private val DangerRed = Color(0xFFE06C75)
 
 data class CollectionItem(val id: String, val slug: String, val titleEn: String, val titleAr: String)
+data class WorkItem(val id: String, val slug: String, val titleEn: String, val origin: String, val collectionId: String)
 data class CommentItem(val id: String, val body: String, val isHidden: Boolean, val author: String, val workTitle: String)
 
 class MainActivity : ComponentActivity() {
@@ -83,6 +88,7 @@ fun VisualsAdminApp() {
     var isLoading by remember { mutableStateOf(false) }
 
     var collections by remember { mutableStateOf<List<CollectionItem>>(emptyList()) }
+    var works by remember { mutableStateOf<List<WorkItem>>(emptyList()) }
     var comments by remember { mutableStateOf<List<CommentItem>>(emptyList()) }
     var selectedColIndex by remember { mutableStateOf(0) }
     var selectedOrigin by remember { mutableStateOf("camera") }
@@ -113,8 +119,25 @@ fun VisualsAdminApp() {
                 }
             }
 
+            val workReq = Request.Builder()
+                .url("$SUPABASE_URL/rest/v1/works?select=id,slug,title_en,origin,collection_id&order=created_at.desc&limit=100")
+                .addHeader("apikey", SUPABASE_ANON_KEY)
+                .addHeader("Authorization", "Bearer $token")
+                .build()
+            client.newCall(workReq).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val arr = JSONArray(resp.body?.string() ?: "[]")
+                    val list = mutableListOf<WorkItem>()
+                    for (i in 0 until arr.length()) {
+                        val o = arr.getJSONObject(i)
+                        list.add(WorkItem(o.getString("id"), o.getString("slug"), o.optString("title_en", ""), o.getString("origin"), o.getString("collection_id")))
+                    }
+                    works = list
+                }
+            }
+
             val comReq = Request.Builder()
-                .url("$SUPABASE_URL/rest/v1/comments?select=id,body,is_hidden,profiles(display_name),works(title_en)&order=created_at.desc&limit=30")
+                .url("$SUPABASE_URL/rest/v1/comments?select=id,body,is_hidden,profiles(display_name),works(title_en)&order=created_at.desc&limit=40")
                 .addHeader("apikey", SUPABASE_ANON_KEY)
                 .addHeader("Authorization", "Bearer $token")
                 .build()
@@ -143,7 +166,7 @@ fun VisualsAdminApp() {
             isLoading = true
             withContext(Dispatchers.IO) {
                 for ((idx, uri) in uris.withIndex()) {
-                    statusMsg = "Processing ${idx + 1}/${uris.size}..."
+                    statusMsg = "Uploading ${idx + 1}/${uris.size}..."
                     val input = context.contentResolver.openInputStream(uri) ?: continue
                     val orig = BitmapFactory.decodeStream(input)
                     input.close()
@@ -169,7 +192,7 @@ fun VisualsAdminApp() {
                             .addHeader("x-upsert", "true")
                             .build()
                         client.newCall(upReq).execute().close()
-                        imageUrls.put(w.toString(), "$SUPABASE_URL/storage/v1/object/public/visuals/$storagePath")
+                        imageUrls.put(w.toString(), "$SUPABASE_URL/storage/v1/object/public/visuals/${storagePath}")
                     }
 
                     val blurBmp = Bitmap.createScaledBitmap(orig, 24, (24f * orig.height / orig.width).toInt().coerceAtLeast(1), true)
@@ -199,6 +222,7 @@ fun VisualsAdminApp() {
                         .build()
                     client.newCall(insReq).execute().close()
                 }
+                loadDashboardData(token)
                 statusMsg = "Uploaded ${uris.size} work(s) to ${col.titleEn}!"
             }
             isLoading = false
@@ -212,14 +236,14 @@ fun VisualsAdminApp() {
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text("Visuals Admin", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = AccentGold)
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             Text("Ahmed Ramadan — Central Visual Home", fontSize = 14.sp, color = MutedGray)
             Spacer(Modifier.height(28.dp))
 
             OutlinedTextField(
                 value = username,
                 onValueChange = { username = it },
-                label = { Text("Username (boda890) or Email") },
+                label = { Text("Username (admin / boda890) or Email") },
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(12.dp))
@@ -232,7 +256,7 @@ fun VisualsAdminApp() {
             )
             if (loginError != null) {
                 Spacer(Modifier.height(8.dp))
-                Text(loginError!!, color = Color(0xFFE06C75), fontSize = 13.sp)
+                Text(loginError!!, color = DangerRed, fontSize = 13.sp)
             }
             Spacer(Modifier.height(20.dp))
             Button(
@@ -285,30 +309,41 @@ fun VisualsAdminApp() {
                 TextButton(onClick = { accessToken = null }) { Text("Sign Out", color = MutedGray) }
             }
 
+            // Visual Stats Row
+            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatCard("Collections", collections.size.toString(), Modifier.weight(1f))
+                StatCard("Works", works.size.toString(), Modifier.weight(1f))
+                StatCard("Comments", comments.size.toString(), Modifier.weight(1f))
+            }
+
             TabRow(selectedTabIndex = activeTab, containerColor = SurfaceDark, contentColor = AccentGold) {
                 Tab(selected = activeTab == 0, onClick = { activeTab = 0 }, text = { Text("Upload") })
-                Tab(selected = activeTab == 1, onClick = { activeTab = 1 }, text = { Text("Collections") })
-                Tab(selected = activeTab == 2, onClick = { activeTab = 2 }, text = { Text("Comments") })
+                Tab(selected = activeTab == 1, onClick = { activeTab = 1 }, text = { Text("Works") })
+                Tab(selected = activeTab == 2, onClick = { activeTab = 2 }, text = { Text("Collections") })
+                Tab(selected = activeTab == 3, onClick = { activeTab = 3 }, text = { Text("Comments") })
             }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(14.dp))
 
             when (activeTab) {
                 0 -> {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        if (collections.isNotEmpty()) {
-                            Text("Collection: ${collections[selectedColIndex].titleEn}", color = AccentGold, fontWeight = FontWeight.SemiBold)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = { selectedColIndex = (selectedColIndex + 1) % collections.size }) {
-                                    Text("Next Collection")
-                                }
+                        Text("1. Select Collection", color = MutedGray, fontSize = 13.sp)
+                        Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            collections.forEachIndexed { idx, col ->
+                                FilterChip(
+                                    selected = selectedColIndex == idx,
+                                    onClick = { selectedColIndex = idx },
+                                    label = { Text(col.titleEn) }
+                                )
                             }
                         }
+                        Text("2. Select Origin", color = MutedGray, fontSize = 13.sp)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("camera", "ai", "design").forEach { orig ->
+                            listOf("camera" to "📷 Camera", "ai" to "✨ AI", "design" to "🎨 Design").forEach { (orig, label) ->
                                 FilterChip(
                                     selected = selectedOrigin == orig,
                                     onClick = { selectedOrigin = orig },
-                                    label = { Text(orig.uppercase()) }
+                                    label = { Text(label) }
                                 )
                             }
                         }
@@ -332,6 +367,37 @@ fun VisualsAdminApp() {
                     }
                 }
                 1 -> {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(works) { w ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().background(SurfaceCard, RoundedCornerShape(10.dp)).padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(w.titleEn.ifBlank { w.slug }, color = TextIvory, fontWeight = FontWeight.Medium)
+                                    Text(w.origin.uppercase(), color = AccentGold, fontSize = 11.sp)
+                                }
+                                TextButton(onClick = {
+                                    val token = accessToken ?: return@TextButton
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            val req = Request.Builder()
+                                                .url("$SUPABASE_URL/rest/v1/works?id=eq.${w.id}")
+                                                .delete()
+                                                .addHeader("apikey", SUPABASE_ANON_KEY)
+                                                .addHeader("Authorization", "Bearer $token")
+                                                .build()
+                                            client.newCall(req).execute().close()
+                                            loadDashboardData(token)
+                                        }
+                                    }
+                                }) { Text("Delete", color = DangerRed) }
+                            }
+                        }
+                    }
+                }
+                2 -> {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedTextField(value = newColSlug, onValueChange = { newColSlug = it }, label = { Text("Slug (e.g. street-cairo)") }, modifier = Modifier.fillMaxWidth())
                         OutlinedTextField(value = newColEn, onValueChange = { newColEn = it }, label = { Text("Title (EN)") }, modifier = Modifier.fillMaxWidth())
@@ -365,11 +431,11 @@ fun VisualsAdminApp() {
                         ) { Text("Create Collection") }
                     }
                 }
-                2 -> {
+                3 -> {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(comments) { c ->
                             Row(
-                                modifier = Modifier.fillMaxWidth().background(SurfaceDark, RoundedCornerShape(10.dp)).padding(12.dp),
+                                modifier = Modifier.fillMaxWidth().background(SurfaceCard, RoundedCornerShape(10.dp)).padding(12.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -401,5 +467,16 @@ fun VisualsAdminApp() {
                 }
             }
         }
+    }
+}
+
+@Composable
+fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.background(SurfaceCard, RoundedCornerShape(12.dp)).padding(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(value, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = AccentGold)
+        Text(label, fontSize = 12.sp, color = MutedGray)
     }
 }
