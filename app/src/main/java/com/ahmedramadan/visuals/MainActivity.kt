@@ -27,6 +27,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -50,7 +53,7 @@ private val MutedGray = Color(0xFF9A958C)
 private val DangerRed = Color(0xFFE06C75)
 
 data class CollectionItem(val id: String, val slug: String, val titleEn: String, val titleAr: String)
-data class WorkItem(val id: String, val slug: String, val titleEn: String, val origin: String, val collectionId: String)
+data class WorkItem(val id: String, val slug: String, val titleEn: String, val origin: String, val collectionId: String, val thumbUrl: String)
 data class CommentItem(val id: String, val body: String, val isHidden: Boolean, val author: String, val workTitle: String)
 
 class MainActivity : ComponentActivity() {
@@ -120,7 +123,7 @@ fun VisualsAdminApp() {
             }
 
             val workReq = Request.Builder()
-                .url("$SUPABASE_URL/rest/v1/works?select=id,slug,title_en,origin,collection_id&order=created_at.desc&limit=100")
+                .url("$SUPABASE_URL/rest/v1/works?select=id,slug,title_en,origin,collection_id,image_urls&order=created_at.desc&limit=100")
                 .addHeader("apikey", SUPABASE_ANON_KEY)
                 .addHeader("Authorization", "Bearer $token")
                 .build()
@@ -130,7 +133,9 @@ fun VisualsAdminApp() {
                     val list = mutableListOf<WorkItem>()
                     for (i in 0 until arr.length()) {
                         val o = arr.getJSONObject(i)
-                        list.add(WorkItem(o.getString("id"), o.getString("slug"), o.optString("title_en", ""), o.getString("origin"), o.getString("collection_id")))
+                        val imgs = o.optJSONObject("image_urls")
+                        val thumb = imgs?.optString("480")?.ifBlank { imgs.optString("1200", "") } ?: ""
+                        list.add(WorkItem(o.getString("id"), o.getString("slug"), o.optString("title_en", ""), o.getString("origin"), o.getString("collection_id"), thumb))
                     }
                     works = list
                 }
@@ -370,10 +375,16 @@ fun VisualsAdminApp() {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(works) { w ->
                             Row(
-                                modifier = Modifier.fillMaxWidth().background(SurfaceCard, RoundedCornerShape(10.dp)).padding(12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth().background(SurfaceCard, RoundedCornerShape(10.dp)).padding(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                AsyncImage(
+                                    model = w.thumbUrl,
+                                    contentDescription = w.titleEn,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceDark)
+                                )
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(w.titleEn.ifBlank { w.slug }, color = TextIvory, fontWeight = FontWeight.Medium)
                                     Text(w.origin.uppercase(), color = AccentGold, fontSize = 11.sp)
