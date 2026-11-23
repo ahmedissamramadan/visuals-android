@@ -21,17 +21,23 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Build Debug APK
-        run: gradle assembleDebug --no-daemon
+      - name: Decode Release Keystore
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > app/release.p12
+      - name: Build Signed Release APK
+        env:
+          ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
+        run: gradle assembleRelease --no-daemon
+      - name: Rename APK
+        run: cp app/build/outputs/apk/release/app-release.apk VisualsAdmin.apk
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: visuals-admin-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: VisualsAdmin.apk
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: Visuals Admin v1.0.${{ github.run_number }}
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: VisualsAdmin.apk
           generate_release_notes: true

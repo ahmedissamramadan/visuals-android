@@ -17,9 +17,23 @@ android {
         versionName = "1.0.$runNum"
     }
 
+    signingConfigs {
+        create("release") {
+            val ksFile = file("release.p12")
+            if (ksFile.exists()) {
+                storeFile = ksFile
+                storePassword = System.getenv("ANDROID_KEY_PASS") ?: ""
+                keyAlias = "visuals"
+                keyPassword = System.getenv("ANDROID_KEY_PASS") ?: ""
+                storeType = "PKCS12"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
