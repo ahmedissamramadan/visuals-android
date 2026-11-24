@@ -828,7 +828,9 @@ fun ArtelligenceApp(pal: ArtPalette, themeLabel: String, onCycleTheme: () -> Uni
                     },
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Image(painter = painterResource(R.drawable.ic_artelligence_symbol), contentDescription = null, modifier = Modifier.size(28.dp).clip(CircleShape))
+                            Box(modifier = Modifier.size(30.dp).clip(CircleShape).background(pal.card), contentAlignment = Alignment.Center) {
+                                Icon(painter = painterResource(R.drawable.ic_artelligence_symbol), contentDescription = null, tint = pal.accent, modifier = Modifier.size(22.dp))
+                            }
                             Text(
                                 if (showAdminScreen) tr("مركز القيادة", "Command Studio") else "Artelligence",
                                 color = pal.text, fontWeight = FontWeight.Bold, fontSize = 17.sp
