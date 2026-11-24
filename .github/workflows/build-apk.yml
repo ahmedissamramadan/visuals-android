@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Artelligence Android APK
 
 on:
   push:
@@ -27,17 +27,21 @@ jobs:
         env:
           ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
         run: gradle assembleRelease --no-daemon
-      - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk VisualsAdmin.apk
+      - name: Package Artelligence APK & Compatibility Alias
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk Artelligence.apk
+          cp app/build/outputs/apk/release/app-release.apk VisualsAdmin.apk
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: visuals-admin-apk
-          path: VisualsAdmin.apk
+          name: artelligence-android-apk
+          path: Artelligence.apk
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: Visuals Admin v1.0.${{ github.run_number }}
-          files: VisualsAdmin.apk
+          tag_name: v2.0.${{ github.run_number }}
+          name: Artelligence Super-App v2.0.${{ github.run_number }}
+          files: |
+            Artelligence.apk
+            VisualsAdmin.apk
           generate_release_notes: true

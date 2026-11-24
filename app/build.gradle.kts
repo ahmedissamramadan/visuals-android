@@ -12,9 +12,9 @@ android {
         applicationId = "com.ahmedramadan.visuals"
         minSdk = 26
         targetSdk = 34
-        val runNum = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 10
-        versionCode = runNum
-        versionName = "1.0.$runNum"
+        val runNum = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionCode = 200 + runNum
+        versionName = "2.0.$runNum"
     }
 
     signingConfigs {
