@@ -72,25 +72,47 @@ data class ArtPalette(
     val onAccent: Color
 )
 
-private val DarkPalette = ArtPalette(
-    bg = Color(0xFF0A0A0A),
+private val ObsidianPalette = ArtPalette(
+    bg = Color(0xFF0B0B0B),
     surface = Color(0xFF141416),
     card = Color(0xFF1C1C20),
     border = Color(0xFF27272A),
     text = Color(0xFFFFFFFF),
     muted = Color(0xFFA1A1AA),
     accent = Color(0xFFFFFFFF),
-    onAccent = Color(0xFF0A0A0A)
+    onAccent = Color(0xFF0B0B0B)
 )
 
-private val LightPalette = ArtPalette(
-    bg = Color(0xFFF5F4F0),
+private val AcidPalette = ArtPalette(
+    bg = Color(0xFF181C19),
+    surface = Color(0xFF242C25),
+    card = Color(0xFF2D372E),
+    border = Color(0xFF39463B),
+    text = Color(0xFFEFF3E7),
+    muted = Color(0xFFB6C2B7),
+    accent = Color(0xFFD5FF5F),
+    onAccent = Color(0xFF181C19)
+)
+
+private val PaperPalette = ArtPalette(
+    bg = Color(0xFFF6F5F1),
     surface = Color(0xFFFFFFFF),
-    card = Color(0xFFEAE8E1),
-    border = Color(0xFFE4E4E0),
-    text = Color(0xFF0A0A0A),
+    card = Color(0xFFF2E8DA),
+    border = Color(0xFFE2D9CB),
+    text = Color(0xFF0B0B0B),
     muted = Color(0xFF52525B),
-    accent = Color(0xFF0A0A0A),
+    accent = Color(0xFF0B0B0B),
+    onAccent = Color(0xFFFFFFFF)
+)
+
+private val CobaltPalette = ArtPalette(
+    bg = Color(0xFFEEF1FF),
+    surface = Color(0xFFFFFFFF),
+    card = Color(0xFFE2E8FF),
+    border = Color(0xFFC7D2FE),
+    text = Color(0xFF0B0B0B),
+    muted = Color(0xFF434B69),
+    accent = Color(0xFF244BEE),
     onAccent = Color(0xFFFFFFFF)
 )
 
@@ -235,8 +257,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            var isDark by remember { mutableStateOf(true) }
-            val pal = if (isDark) DarkPalette else LightPalette
+            // 0=Obsidian, 1=Acid (#D5FF5F), 2=Warm Paper, 3=Cobalt (#244BEE)
+            var themeIdx by remember { mutableStateOf(0) }
+            val themeNames = listOf("Obsidian", "Acid", "Paper", "Cobalt")
+            val pal = when (themeIdx) {
+                1 -> AcidPalette
+                2 -> PaperPalette
+                3 -> CobaltPalette
+                else -> ObsidianPalette
+            }
+            val isDark = themeIdx == 0 || themeIdx == 1
             val scheme = if (isDark) {
                 darkColorScheme(
                     background = pal.bg,
@@ -259,7 +289,11 @@ class MainActivity : ComponentActivity() {
 
             MaterialTheme(colorScheme = scheme) {
                 Surface(modifier = Modifier.fillMaxSize(), color = pal.bg) {
-                    ArtelligenceApp(pal = pal, isDark = isDark, onToggleTheme = { isDark = !isDark })
+                    ArtelligenceApp(
+                        pal = pal,
+                        themeLabel = themeNames[themeIdx],
+                        onCycleTheme = { themeIdx = (themeIdx + 1) % 4 }
+                    )
                 }
             }
         }
@@ -268,7 +302,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ArtelligenceApp(pal: ArtPalette, isDark: Boolean, onToggleTheme: () -> Unit) {
+fun ArtelligenceApp(pal: ArtPalette, themeLabel: String, onCycleTheme: () -> Unit) {
     val client = remember { OkHttpClient() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -802,10 +836,14 @@ fun ArtelligenceApp(pal: ArtPalette, isDark: Boolean, onToggleTheme: () -> Unit)
                         }
                     },
                     actions = {
-                        TextButton(onClick = onToggleTheme) { Text(if (isDark) "☀️" else "🌙", fontSize = 15.sp) }
-                        TextButton(onClick = { isAr = !isAr }) { Text(if (isAr) "EN" else "عربي", color = pal.text, fontSize = 12.sp) }
-                        TextButton(onClick = { scope.launch { loadAllData(accessToken) } }) { Text("🔄", fontSize = 14.sp) }
-                        TextButton(onClick = { showAdminScreen = !showAdminScreen }) { Text("⚙️", fontSize = 16.sp) }
+                        TextButton(onClick = onCycleTheme) { Text(themeLabel, color = pal.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                        TextButton(onClick = { isAr = !isAr }) { Text(if (isAr) "EN" else "عربي", color = pal.text, fontSize = 11.sp) }
+                        IconButton(onClick = { scope.launch { loadAllData(accessToken) } }) {
+                            Image(painter = painterResource(R.drawable.ic_art_refresh), contentDescription = "Sync", modifier = Modifier.size(24.dp).clip(CircleShape))
+                        }
+                        IconButton(onClick = { showAdminScreen = !showAdminScreen }) {
+                            Image(painter = painterResource(R.drawable.ic_art_settings), contentDescription = "Studio", modifier = Modifier.size(24.dp).clip(CircleShape))
+                        }
                     }
                 )
             },
@@ -813,17 +851,17 @@ fun ArtelligenceApp(pal: ArtPalette, isDark: Boolean, onToggleTheme: () -> Unit)
                 if (!showAdminScreen && viewingWork == null && viewingCollection == null) {
                     NavigationBar(containerColor = pal.surface) {
                         val tabs = listOf(
-                            "●" to tr("الرئيسية", "Home"),
-                            "⚡" to tr("الحلول", "Solutions"),
-                            "✓" to tr("الأدلة", "Proof"),
-                            "◈" to tr("عقلي", "Mind"),
-                            "◎" to tr("المختبر", "Lab")
+                            R.drawable.ic_art_home to tr("الرئيسية", "Home"),
+                            R.drawable.ic_art_automation to tr("الحلول", "Solutions"),
+                            R.drawable.ic_art_work to tr("الأدلة", "Proof"),
+                            R.drawable.ic_art_knowledge to tr("عقلي", "Mind"),
+                            R.drawable.ic_art_agents to tr("المختبر", "Lab")
                         )
-                        tabs.forEachIndexed { idx, (ico, lbl) ->
+                        tabs.forEachIndexed { idx, (icoRes, lbl) ->
                             NavigationBarItem(
                                 selected = publicTab == idx,
                                 onClick = { publicTab = idx },
-                                icon = { Text(ico, fontSize = 15.sp) },
+                                icon = { Image(painter = painterResource(icoRes), contentDescription = lbl, modifier = Modifier.size(22.dp).clip(CircleShape)) },
                                 label = { Text(lbl, fontSize = 10.sp) }
                             )
                         }
@@ -831,17 +869,17 @@ fun ArtelligenceApp(pal: ArtPalette, isDark: Boolean, onToggleTheme: () -> Unit)
                 } else if (showAdminScreen && accessToken != null && editingWork == null && viewingCollection == null) {
                     NavigationBar(containerColor = pal.surface) {
                         val tabs = listOf(
-                            "📈" to "CRM",
-                            "🛡️" to tr("أدلة/مجموعات", "Sets"),
-                            "⬆️" to tr("أعمال/رفع", "Works"),
-                            "📝" to tr("المحتوى", "Content"),
-                            "📬" to tr("رسائل/سجل", "Inbox")
+                            R.drawable.ic_art_roi to "CRM",
+                            R.drawable.ic_art_work to tr("أدلة/مجموعات", "Sets"),
+                            R.drawable.ic_art_creative to tr("أعمال/رفع", "Works"),
+                            R.drawable.ic_art_strategy to tr("المحتوى", "Content"),
+                            R.drawable.ic_art_clients to tr("رسائل/سجل", "Inbox")
                         )
-                        tabs.forEachIndexed { idx, (ico, lbl) ->
+                        tabs.forEachIndexed { idx, (icoRes, lbl) ->
                             NavigationBarItem(
                                 selected = adminTab == idx,
                                 onClick = { adminTab = idx },
-                                icon = { Text(ico, fontSize = 15.sp) },
+                                icon = { Image(painter = painterResource(icoRes), contentDescription = lbl, modifier = Modifier.size(22.dp).clip(CircleShape)) },
                                 label = { Text(lbl, fontSize = 9.sp) }
                             )
                         }
