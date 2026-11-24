@@ -839,10 +839,10 @@ fun ArtelligenceApp(pal: ArtPalette, themeLabel: String, onCycleTheme: () -> Uni
                         TextButton(onClick = onCycleTheme) { Text(themeLabel, color = pal.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                         TextButton(onClick = { isAr = !isAr }) { Text(if (isAr) "EN" else "عربي", color = pal.text, fontSize = 11.sp) }
                         IconButton(onClick = { scope.launch { loadAllData(accessToken) } }) {
-                            Image(painter = painterResource(R.drawable.ic_art_refresh), contentDescription = "Sync", modifier = Modifier.size(24.dp).clip(CircleShape))
+                            Icon(painter = painterResource(R.drawable.ic_art_refresh), contentDescription = "Sync", tint = pal.text, modifier = Modifier.size(22.dp))
                         }
                         IconButton(onClick = { showAdminScreen = !showAdminScreen }) {
-                            Image(painter = painterResource(R.drawable.ic_art_settings), contentDescription = "Studio", modifier = Modifier.size(24.dp).clip(CircleShape))
+                            Icon(painter = painterResource(R.drawable.ic_art_settings), contentDescription = "Studio", tint = if (showAdminScreen) pal.accent else pal.text, modifier = Modifier.size(22.dp))
                         }
                     }
                 )
@@ -858,10 +858,11 @@ fun ArtelligenceApp(pal: ArtPalette, themeLabel: String, onCycleTheme: () -> Uni
                             R.drawable.ic_art_agents to tr("المختبر", "Lab")
                         )
                         tabs.forEachIndexed { idx, (icoRes, lbl) ->
+                            val isSel = publicTab == idx
                             NavigationBarItem(
-                                selected = publicTab == idx,
+                                selected = isSel,
                                 onClick = { publicTab = idx },
-                                icon = { Image(painter = painterResource(icoRes), contentDescription = lbl, modifier = Modifier.size(22.dp).clip(CircleShape)) },
+                                icon = { Icon(painter = painterResource(icoRes), contentDescription = lbl, tint = if (isSel) pal.accent else pal.muted, modifier = Modifier.size(22.dp)) },
                                 label = { Text(lbl, fontSize = 10.sp) }
                             )
                         }
@@ -876,10 +877,11 @@ fun ArtelligenceApp(pal: ArtPalette, themeLabel: String, onCycleTheme: () -> Uni
                             R.drawable.ic_art_clients to tr("رسائل/سجل", "Inbox")
                         )
                         tabs.forEachIndexed { idx, (icoRes, lbl) ->
+                            val isSel = adminTab == idx
                             NavigationBarItem(
-                                selected = adminTab == idx,
+                                selected = isSel,
                                 onClick = { adminTab = idx },
-                                icon = { Image(painter = painterResource(icoRes), contentDescription = lbl, modifier = Modifier.size(22.dp).clip(CircleShape)) },
+                                icon = { Icon(painter = painterResource(icoRes), contentDescription = lbl, tint = if (isSel) pal.accent else pal.muted, modifier = Modifier.size(22.dp)) },
                                 label = { Text(lbl, fontSize = 9.sp) }
                             )
                         }
