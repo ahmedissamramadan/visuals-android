@@ -1600,31 +1600,48 @@ fun ArtelligenceApp(pal: ArtPalette, themeLabel: String, onCycleTheme: () -> Uni
                                             } else {
                                                 if (isAr) cs.titleAr else cs.titleEn
                                             }
-                                            Column(modifier = Modifier.fillMaxWidth().background(pal.surface, RoundedCornerShape(14.dp)).border(1.dp, pal.border, RoundedCornerShape(14.dp)).padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                if (cs.coverUrl.isNotBlank()) {
+                                            val isWasl = cs.slug == "wasl-network"
+                                            val badgeLabel = when {
+                                                cs.isIllustrative -> tr("سيناريو توضيحي", "Illustrative")
+                                                cs.isAnonymized -> tr("عمل لعميل · بدون ذكر الاسم", "Client Work · Anonymized")
+                                                cs.slug == "khem-brand" || cs.slug == "nafees-system" -> tr("تجربة من الاستوديو", "Studio Exploration")
+                                                else -> tr("منشور · متاح للعامة", "Live · Public")
+                                            }
+                                            val cardBorder = if (isWasl) Color(0xFF6C4EF8) else pal.border
+                                            Column(modifier = Modifier.fillMaxWidth().background(pal.surface, RoundedCornerShape(14.dp)).border(1.5.dp, cardBorder, RoundedCornerShape(14.dp)).padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                if (cs.coverUrl.isNotBlank() && !isWasl) {
                                                     AsyncImage(model = cs.coverUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().height(145.dp).clip(RoundedCornerShape(10.dp)))
                                                 }
                                                 Text(
-                                                    "${if (isAr) cs.sectorAr else cs.sectorEn} · ${if (cs.isIllustrative) tr("سيناريو توضيحي", "Illustrative") else tr("دليل موثق ✓", "Verified ✓")}",
-                                                    color = pal.muted, fontSize = 11.sp, fontWeight = FontWeight.Bold
+                                                    "${if (isAr) cs.sectorAr else cs.sectorEn} · $badgeLabel",
+                                                    color = if (isWasl) Color(0xFF6C4EF8) else pal.muted, fontSize = 12.sp, fontWeight = FontWeight.Bold
                                                 )
                                                 Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                                                Text("${tr("المشكلة:", "Problem:")} ${if (isAr) cs.problemAr else cs.problemEn}", fontSize = 12.sp, color = pal.muted)
-                                                Text("${tr("الحل:", "Architecture:")} ${if (isAr) cs.solutionAr else cs.solutionEn}", fontSize = 12.sp, color = pal.muted)
-                                                Text("${tr("المخرج الموثق:", "Outcome:")} ${if (isAr) cs.outcomeAr else cs.outcomeEn}", fontSize = 12.sp, color = pal.text)
-                                                (if (isAr) cs.deliverablesAr else cs.deliverablesEn).take(3).forEach { d ->
-                                                    Text("• $d", fontSize = 11.sp, color = pal.muted)
+                                                Text("${tr("التحدي:", "Problem:")} ${if (isAr) cs.problemAr else cs.problemEn}", fontSize = 14.sp, color = pal.muted, lineHeight = 22.sp)
+                                                Text("${tr("ما بنيناه:", "What we built:")} ${if (isAr) cs.solutionAr else cs.solutionEn}", fontSize = 14.sp, color = pal.muted, lineHeight = 22.sp)
+                                                Text(
+                                                    if (isWasl) tr("النتيجة: 120+ مؤسس معتمد، 21 شركة ناشئة، 140+ مستثمر وصندوق", "Outcome: 120+ approved founders, 21 startups, 140+ VCs & angels")
+                                                    else "${if (cs.isIllustrative || cs.slug == "khem-brand" || cs.slug == "nafees-system") tr("ما يوضحه:", "What it demonstrates:") else tr("النتيجة:", "Outcome:")} ${if (isAr) cs.outcomeAr else cs.outcomeEn}",
+                                                    fontSize = 14.sp, color = pal.text, lineHeight = 22.sp
+                                                )
+                                                if (isWasl) {
+                                                    Text(tr("الهوية البصرية: تسنيم إبراهيم", "Brand identity by Tasneem Ibrahim"), fontSize = 12.sp, color = pal.muted)
                                                 }
-                                                val evNote = if (isAr) cs.evidenceNoteAr else cs.evidenceNoteEn
-                                                if (evNote.isNotBlank()) Text(evNote, fontSize = 11.sp, color = pal.muted)
                                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                                     if (cs.collectionSlug.isNotBlank() && !cs.isAnonymized) {
                                                         Button(onClick = { viewingCollection = collections.find { it.slug == cs.collectionSlug } }) {
-                                                            Text(tr("معاينة الهوية", "View System"), fontSize = 12.sp)
+                                                            Text(tr("معاينة الأصول", "View Assets"), fontSize = 13.sp)
                                                         }
                                                     }
                                                     if (cs.externalUrl.isNotBlank()) {
-                                                        OutlinedButton(onClick = { openUrl(cs.externalUrl) }) { Text(tr("فتح المنصة ↗", "Open Live ↗"), fontSize = 12.sp) }
+                                                        if (isWasl) {
+                                                            Button(
+                                                                onClick = { openUrl(cs.externalUrl) },
+                                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC8F05A), contentColor = Color(0xFF202020))
+                                                            ) { Text(tr("زيارة المنصة ↗", "Open Live ↗"), fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+                                                        } else {
+                                                            OutlinedButton(onClick = { openUrl(cs.externalUrl) }) { Text(tr("فتح المنصة ↗", "Open Live ↗"), fontSize = 13.sp) }
+                                                        }
                                                     }
                                                 }
                                             }
