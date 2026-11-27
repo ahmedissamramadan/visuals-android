@@ -183,30 +183,40 @@ fun SuperAppProgressScreen(
         contentPadding = PaddingValues(vertical = 16.dp)
     ) {
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = if (isArabic) "التقدم اللحظي والفريق" else "Live Progress & Team",
-                    color = text,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold
+                    text = "ARTELLIGENCE  ·  ART • INTELLIGENCE • IMPACT",
+                    color = muted,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
                 )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(if (isSyncing) accent else surface)
-                        .border(1.dp, border, RoundedCornerShape(999.dp))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (isSyncing) (if (isArabic) "مزامنة..." else "Syncing...") else (if (isArabic) "متصل لحظياً" else "Live"),
-                        color = if (isSyncing) onAccent else Color(0xFF10B981),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
+                        text = if (isArabic) "التقدم اللحظي والفريق" else "Live Progress & Team",
+                        color = text,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
                     )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(if (isSyncing) accent else surface)
+                            .border(1.dp, border, RoundedCornerShape(999.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = if (isSyncing) (if (isArabic) "مزامنة..." else "Syncing...") else (if (isArabic) "متصل لحظياً" else "Live"),
+                            color = if (isSyncing) onAccent else Color(0xFF10B981),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
         }
@@ -448,6 +458,33 @@ fun SuperAppProgressScreen(
                             fontSize = 13.sp
                         )
                     }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(12.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF0A0A0A))
+                        .border(1.dp, Color(0xFF27272A), RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "ARTELLIGENCE · SSOT v2.0",
+                        color = Color(0xFFFFFFFF),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Ahmed Issam Ramadan • VentureCycle Studio",
+                        color = Color(0xFFA1A1AA),
+                        fontSize = 10.sp
+                    )
                 }
             }
         }
