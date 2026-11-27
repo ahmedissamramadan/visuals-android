@@ -876,7 +876,8 @@ fun ArtelligenceApp(pal: ArtPalette, themeLabel: String, onCycleTheme: () -> Uni
                             R.drawable.ic_art_work to tr("أدلة/مجموعات", "Sets"),
                             R.drawable.ic_art_creative to tr("أعمال/رفع", "Works"),
                             R.drawable.ic_art_strategy to tr("المحتوى", "Content"),
-                            R.drawable.ic_art_clients to tr("رسائل/سجل", "Inbox")
+                            R.drawable.ic_art_clients to tr("رسائل/سجل", "Inbox"),
+                            R.drawable.ic_art_home to tr("التقدم", "Progress")
                         )
                         tabs.forEachIndexed { idx, (icoRes, lbl) ->
                             val isSel = adminTab == idx
@@ -1081,6 +1082,23 @@ fun ArtelligenceApp(pal: ArtPalette, themeLabel: String, onCycleTheme: () -> Uni
                         }
                     } else {
                         when (adminTab) {
+                            5 -> {
+                                SuperAppProgressScreen(
+                                    supabaseUrl = SUPABASE_URL,
+                                    anonKey = SUPABASE_ANON_KEY,
+                                    accessToken = accessToken,
+                                    actorName = currentAdminName,
+                                    isArabic = isAr,
+                                    bg = pal.bg,
+                                    surface = pal.surface,
+                                    card = pal.card,
+                                    border = pal.border,
+                                    text = pal.text,
+                                    muted = pal.muted,
+                                    accent = pal.accent,
+                                    onAccent = pal.onAccent
+                                )
+                            }
                             0 -> {
                                 // TAB 0: Honest Mini-CRM & Teardown Queue
                                 val signedEgp = crmDeals.filter { it.isSigned }.sumOf { it.signedAmountEgp }.toLong()

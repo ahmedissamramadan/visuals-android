@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "VisualsAdmin"
+rootProject.name = "Artelligence"
 include(":app")
